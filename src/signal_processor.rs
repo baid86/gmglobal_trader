@@ -1,7 +1,7 @@
-use crate::gmglobal_watcher::GMGlobalWatcher;
-use crate::market_data::MarketData;
+use crate::market_data::Trader;
 use crate::signal_receiver::{Signal, SignalSide};
 use crate::trade::{OrderType, TradeSide};
+use std::sync::Arc;
 use std::time::Duration;
 
 fn calculate_delta(price: f64) -> f64 {
@@ -18,7 +18,7 @@ fn round_to_5_paisa(value: f64) -> f64 {
     (value / 0.05).round() * 0.05
 }
 
-pub async fn process_signal(watcher: std::sync::Arc<GMGlobalWatcher>, signal: Signal) {
+pub async fn process_signal<T: Trader + 'static>(watcher: Arc<T>, signal: Signal) {
     println!("[SIGNAL] Processing {:?}", signal);
 
     let threshold = calculate_delta(signal.price);
@@ -65,7 +65,7 @@ pub async fn process_signal(watcher: std::sync::Arc<GMGlobalWatcher>, signal: Si
                                     signal.price,
                                     TradeSide::Buy,
                                     signal.trade_qty,
-                                    2, // default market_type_id
+                                    1, // market_type_id
                                     None,
                                     None,
                                 )
@@ -114,7 +114,7 @@ pub async fn process_signal(watcher: std::sync::Arc<GMGlobalWatcher>, signal: Si
                                     signal.price,
                                     TradeSide::Sell,
                                     signal.trade_qty,
-                                    2, // default market_type_id
+                                    1, // market_type_id
                                     None,
                                     None,
                                 )
@@ -139,8 +139,8 @@ pub async fn process_signal(watcher: std::sync::Arc<GMGlobalWatcher>, signal: Si
     println!("[SIGNAL] Completed {}", signal.product);
 }
 
-pub async fn start_sl_worker(
-    watcher: std::sync::Arc<GMGlobalWatcher>,
+pub async fn start_sl_worker<T: Trader + 'static>(
+    watcher: Arc<T>,
     product: String,
     _signal_price: f64,
     entry_side: TradeSide,
@@ -248,8 +248,8 @@ pub async fn start_sl_worker(
         let should_update = match current_sl_price {
             None => true, // Should not happen after initial placement
             Some(curr) => match entry_side {
-                TradeSide::Buy => new_sl_price > curr + 0.05, // Only move UP
-                TradeSide::Sell => new_sl_price < curr - 0.05, // Only move DOWN
+                TradeSide::Buy => new_sl_price >= curr + 0.05, // Only move UP
+                TradeSide::Sell => new_sl_price <= curr - 0.05, // Only move DOWN
             },
         };
 
@@ -303,8 +303,6 @@ pub async fn start_sl_worker(
                     }
                     continue;
                 }
-                // Reset counter only if we also successfully place (see below) or if no placement needed
-                // Actually, resetting on any success is better for "stuck" detection
                 consecutive_failures = 0;
             }
 

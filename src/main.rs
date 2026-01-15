@@ -1,18 +1,12 @@
-mod config;
-mod gmglobal_watcher;
-mod market_data;
-mod mock_market_data;
-mod signal_processor;
-mod signal_receiver;
-mod trade;
-
-use crate::trade::TradeSide;
 use clap::Parser;
-use config::GMGlobalConfig;
-use gmglobal_watcher::GMGlobalWatcher;
-use signal_processor::{process_signal, start_sl_worker};
-use signal_receiver::Signal;
+use std::sync::Arc;
 use tokio::sync::mpsc;
+use trading_engine::config::GMGlobalConfig;
+use trading_engine::gmglobal_watcher::GMGlobalWatcher;
+use trading_engine::signal_processor::{process_signal, start_sl_worker};
+use trading_engine::signal_receiver::Signal;
+use trading_engine::trade::TradeSide;
+use trading_engine::{config, gmglobal_watcher, signal_processor, signal_receiver, trade};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -58,18 +52,20 @@ async fn main() {
             for order_id in orders {
                 match watcher.delete_order(&order_id).await {
                     Ok(_) => println!("[STARTUP] Deleted pending order: {}", order_id),
-                    Err(e) => println!("[STARTUP] Error deleting order {}: {}", order_id, e),
+                    Err(e) => println!(
+                        "[STARTUP] Failed to delete pending order {}: {}",
+                        order_id, e
+                    ),
                 }
             }
         }
-        Err(e) => println!("[STARTUP] Error fetching pending orders: {}", e),
+        Err(e) => println!("[STARTUP] Failed to fetch pending orders: {}", e),
     }
 
-    // Place initial SL and start sl worker for all the open position
+    // Process open positions
     match watcher.get_open_positions().await {
         Ok(positions) => {
             for pos in positions {
-                // Assuming position structure based on expected API
                 let product = pos["InstrumentIdentifier"]
                     .as_str()
                     .unwrap_or("")
@@ -78,15 +74,17 @@ async fn main() {
                 let side_str = pos["TradeSide"].as_str().unwrap_or("").to_lowercase();
                 let entry_price = pos["AveragePrice"].as_f64().unwrap_or(0.0);
 
-                if product.is_empty() || qty == 0 {
+                let side = if side_str == "buy" {
+                    TradeSide::Buy
+                } else if side_str == "sell" {
+                    TradeSide::Sell
+                } else {
+                    continue;
+                };
+
+                if qty == 0 {
                     continue;
                 }
-
-                let side = if side_str.contains("buy") {
-                    TradeSide::Buy
-                } else {
-                    TradeSide::Sell
-                };
 
                 println!(
                     "[STARTUP] Starting SL worker for open position: {} {} @ {}",
@@ -112,7 +110,7 @@ async fn main() {
                 });
             }
         }
-        Err(e) => println!("[STARTUP] Error fetching open positions: {}", e),
+        Err(e) => println!("[STARTUP] Failed to fetch open positions: {}", e),
     }
 
     // 3. Start Signal Receiver
@@ -126,23 +124,14 @@ async fn main() {
     let lot_count = args.lots;
 
     tokio::spawn(async move {
+        let w = watcher_for_signals;
         while let Some(signal) = signal_rx.recv().await {
-            let w = watcher_for_signals.clone();
-
-            // Perform script check BEFORE starting sequential logic
-            if !w.has_script(&signal.product).await {
-                println!(
-                    "[SIGNAL] Script not found: {}. Skipping signal.",
-                    signal.product
-                );
-                continue;
-            }
-
             println!(
                 "[SIGNAL] Processing {} for {} lots sequentially",
                 signal.product, lot_count
             );
 
+            let w_inner = w.clone();
             tokio::spawn(async move {
                 for i in 0..lot_count {
                     println!(
@@ -152,7 +141,7 @@ async fn main() {
                         signal.product
                     );
                     let s = signal.clone();
-                    process_signal(w.clone(), s).await;
+                    process_signal(w_inner.clone(), s).await;
                 }
                 println!(
                     "[SIGNAL] Completed all {} lots for {}",

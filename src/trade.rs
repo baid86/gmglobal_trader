@@ -4,14 +4,14 @@ use serde::Serialize;
 // Trade enums
 // =======================
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TradeSide {
     Sell = 1,
     Buy = 0,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum OrderType {
     Market = 0,
@@ -93,4 +93,27 @@ pub struct DataTableResponse {
     pub total_display_records: serde_json::Value,
     #[serde(rename = "aaData")]
     pub data: Vec<Vec<serde_json::Value>>,
+}
+pub fn value_to_f64(v: &serde_json::Value) -> f64 {
+    if let Some(f) = v.as_f64() {
+        f
+    } else if let Some(i) = v.as_i64() {
+        i as f64
+    } else if let Some(s) = v.as_str() {
+        s.parse::<f64>().unwrap_or(0.0)
+    } else {
+        0.0
+    }
+}
+
+pub fn value_to_u64(v: &serde_json::Value) -> u64 {
+    if let Some(u) = v.as_u64() {
+        u
+    } else if let Some(i) = v.as_i64() {
+        i.unsigned_abs()
+    } else if let Some(s) = v.as_str() {
+        s.parse::<i64>().map(|i| i.unsigned_abs()).unwrap_or(0)
+    } else {
+        0
+    }
 }

@@ -588,15 +588,7 @@ impl GMGlobalWatcher {
                 // According to provided example, ID is at index 13
                 if row.len() > 13 {
                     let id_val = &row[13];
-                    let id_str = if let Some(s) = id_val.as_str() {
-                        s.to_string()
-                    } else if let Some(n) = id_val.as_i64() {
-                        n.to_string()
-                    } else if let Some(n) = id_val.as_u64() {
-                        n.to_string()
-                    } else {
-                        "".to_string()
-                    };
+                    let id_str = crate::trade::value_to_u64(id_val).to_string();
 
                     if !id_str.is_empty() {
                         println!(
@@ -666,7 +658,7 @@ impl GMGlobalWatcher {
             for row in data_table_resp.data {
                 if row.len() > 22 {
                     let product = row[0].as_str().unwrap_or("").to_string();
-                    let net_qty = row[22].as_u64().unwrap_or(0);
+                    let net_qty = crate::trade::value_to_u64(&row[22]);
 
                     if net_qty == 0 {
                         continue;
@@ -689,9 +681,9 @@ impl GMGlobalWatcher {
 
                     let side = if buy_qty > sell_qty { "buy" } else { "sell" };
                     let avg_price = if buy_qty > sell_qty {
-                        row[5].as_f64().unwrap_or(0.0)
+                        crate::trade::value_to_f64(&row[5])
                     } else {
-                        row[7].as_f64().unwrap_or(0.0)
+                        crate::trade::value_to_f64(&row[7])
                     };
 
                     // Extract script_id (index 24) and script_expiry_id (index 23)
@@ -732,4 +724,35 @@ struct MarketWatchScript {
     script_name: String,
     script_expiry_id: String,
     script_expiry_type: String,
+}
+
+#[async_trait::async_trait]
+impl crate::market_data::TradeExecutor for GMGlobalWatcher {
+    async fn place_trade(
+        &self,
+        product: &str,
+        price: Option<f64>,
+        side: crate::trade::TradeSide,
+        order_type: crate::trade::OrderType,
+        trade_qty: u32,
+        market_type_id: u8,
+        script_id: Option<String>,
+        script_expiry_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        self.place_trade(
+            product,
+            price,
+            side,
+            order_type,
+            trade_qty,
+            market_type_id,
+            script_id,
+            script_expiry_id,
+        )
+        .await
+    }
+
+    async fn delete_order(&self, order_id: &str) -> Result<serde_json::Value, String> {
+        self.delete_order(order_id).await
+    }
 }

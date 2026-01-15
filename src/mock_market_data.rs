@@ -48,7 +48,7 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    use crate::process_signal;
+    use crate::signal_processor::process_signal;
     use crate::signal_receiver::{Signal, SignalSide};
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use serde::Deserialize;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -111,23 +112,44 @@ fn parse_signal(text: &str) -> Option<Signal> {
 pub async fn start(tx: Sender<Signal>) {
     let url = "wss://market-trader.onrender.com/ws";
 
-    println!("Connecting to signal WebSocket...");
-    let (ws_stream, _) = connect_async(url)
-        .await
-        .expect("Failed to connect to signal WS");
+    loop {
+        println!("Connecting to signal WebSocket...");
+        let ws_result = connect_async(url).await;
 
-    println!("Connected to signal WebSocket");
+        let ws_stream = match ws_result {
+            Ok((stream, _)) => stream,
+            Err(e) => {
+                println!("Failed to connect to signal WS: {}. Retrying in 5s...", e);
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
-    let (_, mut read) = ws_stream.split();
+        println!("Connected to signal WebSocket");
 
-    while let Some(msg) = read.next().await {
-        if let Ok(Message::Text(text)) = msg {
-            if let Some(signal) = parse_signal(&text) {
-                println!("[SIGNAL RECEIVED] {:?}", signal);
-                let _ = tx.send(signal).await;
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    if let Some(signal) = parse_signal(&text) {
+                        println!("[SIGNAL RECEIVED] {:?}", signal);
+                        let _ = tx.send(signal).await;
+                    }
+                }
+                Ok(Message::Close(_)) => {
+                    println!("Signal WebSocket closed by server");
+                    break;
+                }
+                Err(e) => {
+                    println!("Signal WebSocket error: {}", e);
+                    break;
+                }
+                _ => {}
             }
         }
-    }
 
-    println!("Signal WebSocket closed");
+        println!("Signal WebSocket connection lost. Reconnecting in 5s...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
 }
