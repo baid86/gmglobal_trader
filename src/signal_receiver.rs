@@ -3,8 +3,6 @@ use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-
-
 #[derive(Debug, Deserialize)]
 struct SignalEnvelope {
     #[serde(rename = "type")]
@@ -15,7 +13,7 @@ struct SignalEnvelope {
 #[derive(Debug, Deserialize)]
 struct SignalData {
     symbol: String,
-    signal_type: String,          // "BUY" / "SELL"
+    signal_type: String, // "BUY" / "SELL"
     price_at_signal: f64,
     metadata: SignalMetadata,
 }
@@ -36,6 +34,7 @@ pub enum SignalSide {
 pub struct Signal {
     pub product: String,
     pub price: f64,
+    #[allow(dead_code)]
     pub target: f64,
     pub side: SignalSide,
     pub trade_qty: u32,
@@ -43,6 +42,7 @@ pub struct Signal {
 
 // ---- Adjust this to match your real signal payload ----
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct RawSignal {
     product: String,
     price: f64,
@@ -71,7 +71,6 @@ fn map_symbol(symbol: &str) -> Option<String> {
 
     Some(format!("{}-I", underlying))
 }
-
 
 fn parse_signal(text: &str) -> Option<Signal> {
     // Find first '{' and last '}'
@@ -109,9 +108,8 @@ fn parse_signal(text: &str) -> Option<Signal> {
     })
 }
 
-
 pub async fn start(tx: Sender<Signal>) {
-    let url = "ws://localhost:8000/ws";
+    let url = "wss://market-trader.onrender.com/ws";
 
     println!("Connecting to signal WebSocket...");
     let (ws_stream, _) = connect_async(url)

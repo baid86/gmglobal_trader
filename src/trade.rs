@@ -11,12 +11,13 @@ pub enum TradeSide {
     Buy = 0,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum OrderType {
-    Limit = 2,
     Market = 0,
-    StopLoss = 1,
+    #[allow(dead_code)]
+    Limit = 1,
+    StopLoss = 2,
 }
 
 // =======================
@@ -26,18 +27,18 @@ pub enum OrderType {
 #[derive(Debug, Serialize)]
 pub struct TradeRequest {
     // Known fixed fields
-    pub market_type_id: u8,     // always 2
-    pub trade_type: u8,          // 0=BUY, 1=SELL
-    pub trade_type_x: u8,        // 1=LIMIT, 2=MARKET, 3=SL
+    pub market_type_id: u8, // always 2
+    pub trade_type: u8,     // 0=BUY, 1=SELL
+    pub trade_type_x: u8,   // 1=LIMIT, 2=MARKET, 3=SL
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trade_rate: Option<String>,
 
-    pub trade_qty: u32,          // usually 1
-    pub trade_lot: u8,           // usually 1
+    pub trade_qty: u32, // usually 1
+    pub trade_lot: u8,  // usually 1
     pub check_script_name: String,
-    pub user_id: String,         // empty string works
-    pub device_type: u8,         // always 0
+    pub user_id: String, // empty string works
+    pub device_type: u8, // always 0
 
     // Unknown / optional (omit if None)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,14 +59,11 @@ impl TradeRequest {
         side: TradeSide,
         order_type: OrderType,
         trade_qty: u32,
+        market_type_id: u8,
     ) -> Self {
         let trade_rate: Option<String> = price.map(|p| p.to_string());
-        // let trade_rate = match order_type {
-        //     OrderType::Market => price.map(|p| p.to_string()),
-        //     _ => price.map(|p| p.to_string()),
-        // };
         Self {
-            market_type_id: 2,
+            market_type_id,
             trade_type: side as u8,
             trade_type_x: order_type as u8,
             trade_rate: trade_rate,
@@ -78,4 +76,21 @@ impl TradeRequest {
             script_expiry_id: None,
         }
     }
+}
+
+// =======================
+// DataTable response
+// =======================
+
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+pub struct DataTableResponse {
+    #[serde(rename = "sEcho")]
+    pub s_echo: serde_json::Value,
+    #[serde(rename = "iTotalRecords")]
+    pub total_records: serde_json::Value,
+    #[serde(rename = "iTotalDisplayRecords")]
+    pub total_display_records: serde_json::Value,
+    #[serde(rename = "aaData")]
+    pub data: Vec<Vec<serde_json::Value>>,
 }

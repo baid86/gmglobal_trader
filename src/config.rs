@@ -7,10 +7,10 @@ pub struct GMGlobalConfig {
 }
 
 impl GMGlobalConfig {
-    pub fn new() -> Self {
+    pub fn new(username: String, password: String) -> Self {
         Self {
-            username: "592812".to_string(),
-            password: "Abcd6666".to_string(),
+            username,
+            password,
             login_url: "https://www.gmglobal.org/ajaxfiles/logincheck.php".to_string(),
             socket_base: "https://thedatamining.org:4003/socket.io/".to_string(),
         }
