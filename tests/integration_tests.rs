@@ -28,6 +28,7 @@ mock! {
             script_expiry_id: Option<String>,
         ) -> Result<serde_json::Value, String>;
         async fn delete_order(&self, order_id: &str) -> Result<serde_json::Value, String>;
+        async fn get_open_positions(&self) -> Result<Vec<serde_json::Value>, String>;
     }
 }
 
@@ -166,6 +167,17 @@ async fn test_sl_worker_trailing() {
         .times(1)
         .returning(|_| Err("Trade Already Deleted".to_string()));
 
+    // Mock get_open_positions to return a valid position (worker checks every 5 cycles)
+    // Since the test runs quickly, we might get 0-1 checks before exit
+    mock.expect_get_open_positions().times(..2).returning(|| {
+        Ok(vec![json!({
+            "InstrumentIdentifier": "TRAIL-I",
+            "Quantity": 1,
+            "TradeSide": "buy",
+            "AveragePrice": 100.0
+        })])
+    });
+
     let trader = Arc::new(mock);
     let t = trader.clone();
 
@@ -206,6 +218,9 @@ async fn test_failed_initial_sl_placement() {
     mock.expect_place_trade()
         .times(10)
         .returning(|_, _, _, _, _, _, _, _| Err("Internal Server Error".to_string()));
+
+    // No position check expectations since worker fails during initial placement
+    // (before entering the main loop where position checks happen)
 
     let trader = Arc::new(mock);
 

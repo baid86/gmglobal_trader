@@ -227,8 +227,85 @@ pub async fn start_sl_worker<T: Trader + 'static>(
     let mut current_sl_price = Some(sl_price);
     let mut consecutive_failures = 0;
     let max_consecutive_failures = 10; // User requested 10 retries
+    let mut cycle_count = 0;
 
     loop {
+        cycle_count += 1;
+
+        // Every 5 cycles, verify the position still exists
+        if cycle_count % 5 == 0 {
+            match watcher.get_open_positions().await {
+                Ok(positions) => {
+                    let position_exists = positions.iter().any(|pos| {
+                        let pos_product = pos["InstrumentIdentifier"].as_str().unwrap_or("");
+                        let pos_qty = crate::trade::value_to_u64(&pos["Quantity"]);
+                        let pos_side_str = pos["TradeSide"].as_str().unwrap_or("").to_lowercase();
+
+                        let pos_side = if pos_side_str == "buy" {
+                            TradeSide::Buy
+                        } else if pos_side_str == "sell" {
+                            TradeSide::Sell
+                        } else {
+                            return false;
+                        };
+
+                        pos_product == product && pos_qty == qty as u64 && pos_side == entry_side
+                    });
+
+                    if !position_exists {
+                        println!(
+                            "[SL_WORKER] [{}] Position no longer exists or quantity changed. Cleaning up SL and exiting.",
+                            product
+                        );
+
+                        // Try to delete the SL order if it exists
+                        if let Some(sl_id) = current_sl_id.take() {
+                            println!(
+                                "[SL_WORKER] [{}] Attempting to delete orphaned SL order {}",
+                                product, sl_id
+                            );
+                            // Regular delete_order now has smart checking and will detect if order is gone
+                            match watcher.delete_order(&sl_id).await {
+                                Ok(_) => {
+                                    println!(
+                                        "[SL_WORKER] [{}] Successfully deleted orphaned SL order {}",
+                                        product, sl_id
+                                    );
+                                }
+                                Err(e) => {
+                                    // These errors are expected when position was closed - SL was likely already executed/deleted
+                                    let err_lower = e.to_lowercase();
+                                    if err_lower.contains("already")
+                                        || err_lower.contains("not found")
+                                        || err_lower.contains("invalid login")
+                                        || err_lower.contains("executed")
+                                    {
+                                        println!(
+                                            "[SL_WORKER] [{}] Orphaned SL order {} likely already processed: {}",
+                                            product, sl_id, e
+                                        );
+                                    } else {
+                                        println!(
+                                            "[SL_WORKER] [{}] Warning: Failed to delete orphaned SL {}: {}",
+                                            product, sl_id, e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        return;
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        "[SL_WORKER] [{}] Failed to verify position: {}. Continuing...",
+                        product, e
+                    );
+                }
+            }
+        }
+
         let quote = watcher.get_quote(&product).await;
 
         // Calculate potential SL price based on .1% less than min(bid, ltp)

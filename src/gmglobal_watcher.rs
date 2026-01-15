@@ -1,7 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{cookie::Jar, Client};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -423,6 +423,14 @@ impl GMGlobalWatcher {
     }
 
     pub async fn delete_order(&self, order_id: &str) -> Result<Value, String> {
+        self.delete_order_with_retry(order_id, true).await
+    }
+
+    pub async fn delete_order_with_retry(
+        &self,
+        order_id: &str,
+        retry_on_session_error: bool,
+    ) -> Result<Value, String> {
         let mut retry_count = 0;
         let url = "https://www.gmglobal.org/ajaxfiles/trade_delete.php";
 
@@ -445,15 +453,85 @@ impl GMGlobalWatcher {
 
             drop(http); // Release read lock
 
-            let resp = resp_result.map_err(|e| e.to_string())?;
-            let text = resp.text().await.map_err(|e| e.to_string())?;
-            let json: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+            let resp = resp_result.map_err(|e| {
+                println!(
+                    "[WATCHER] Delete order {} - HTTP request failed: {}",
+                    trade_id, e
+                );
+                e.to_string()
+            })?;
+
+            println!(
+                "[WATCHER] Delete order {} - Received response, reading body...",
+                trade_id
+            );
+            let text = resp.text().await.map_err(|e| {
+                println!(
+                    "[WATCHER] Delete order {} - Failed to read response body: {}",
+                    trade_id, e
+                );
+                e.to_string()
+            })?;
+
+            println!(
+                "[WATCHER] Delete order {} - Response body: {}",
+                trade_id, text
+            );
+            let json: Value = serde_json::from_str(&text).map_err(|e| {
+                println!(
+                    "[WATCHER] Delete order {} - Failed to parse JSON: {}",
+                    trade_id, e
+                );
+                e.to_string()
+            })?;
 
             if json["status"] == "error" || json["status"] == "fail" {
                 let msg = json["message"].as_str().unwrap_or("Trade Delete Failed");
-                if (msg.contains("Invalid Login") || msg.contains("Invalid Server Time"))
+                println!(
+                    "[WATCHER] Delete order {} - Error response: '{}' (retry_count: {}/2, retry_enabled: {})",
+                    trade_id, msg, retry_count, retry_on_session_error
+                );
+
+                if retry_on_session_error
+                    && (msg.contains("Invalid Login") || msg.contains("Invalid Server Time"))
                     && retry_count < 2
                 {
+                    // Smart check: verify if the order actually exists before re-logging
+                    println!(
+                        "[WATCHER] Delete order {} - Checking if order still exists before re-login...",
+                        trade_id
+                    );
+
+                    match self.get_pending_orders().await {
+                        Ok(pending_orders) => {
+                            let order_exists = pending_orders.iter().any(|id| id == order_id);
+
+                            if !order_exists {
+                                println!(
+                                    "[WATCHER] Delete order {} - Order not in pending list. Likely already deleted/executed.",
+                                    trade_id
+                                );
+                                // Treat as success - order is gone
+                                return Ok(json!({
+                                    "status": "success",
+                                    "message": "Order already processed",
+                                    "note": "Order not found in pending orders"
+                                }));
+                            }
+
+                            println!(
+                                "[WATCHER] Delete order {} - Order still exists. Proceeding with re-login.",
+                                trade_id
+                            );
+                        }
+                        Err(e) => {
+                            println!(
+                                "[WATCHER] Delete order {} - Could not verify order existence: {}. Proceeding with re-login anyway.",
+                                trade_id, e
+                            );
+                        }
+                    }
+
                     retry_count += 1;
                     println!(
                         "[WATCHER] {} detected. Re-logging (Attempt {})...",
@@ -465,9 +543,11 @@ impl GMGlobalWatcher {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                     continue; // Retry the loop
                 }
+                println!("[WATCHER] Delete order {} - Failed: {}", trade_id, msg);
                 return Err(msg.to_string());
             }
 
+            println!("[WATCHER] Delete order {} - Success!", trade_id);
             return Ok(json);
         }
     }
@@ -754,5 +834,9 @@ impl crate::market_data::TradeExecutor for GMGlobalWatcher {
 
     async fn delete_order(&self, order_id: &str) -> Result<serde_json::Value, String> {
         self.delete_order(order_id).await
+    }
+
+    async fn get_open_positions(&self) -> Result<Vec<serde_json::Value>, String> {
+        self.get_open_positions().await
     }
 }

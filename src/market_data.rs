@@ -24,6 +24,8 @@ pub trait TradeExecutor: Send + Sync {
     ) -> Result<Value, String>;
 
     async fn delete_order(&self, order_id: &str) -> Result<Value, String>;
+
+    async fn get_open_positions(&self) -> Result<Vec<Value>, String>;
 }
 
 pub trait Trader: MarketData + TradeExecutor {}
